@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@theme {
+  --color-flux-bg: #07080a;
+  --color-flux-surface: #101216;
+  --color-flux-accent: #7cf7d4;
+  --color-flux-accent-dim: #2c5f52;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--color-flux-bg);
+  color: #e8eaed;
+  -webkit-font-smoothing: antialiased;
+}
