@@ -15,10 +15,15 @@ function getClient(): GoogleGenAI | null {
   return client;
 }
 
+type InstructionContext = {
+  masked: boolean;
+  chained: boolean;
+  fusion: boolean;
+};
+
 function buildInstruction(
   prompt: string,
-  masked: boolean,
-  chained: boolean
+  { masked, chained, fusion }: InstructionContext
 ): string {
   if (chained) {
     return [
@@ -27,6 +32,24 @@ function buildInstruction(
       "Re-apply exactly the same transformation to the first image — same materials, colors, and added elements as the references —",
       "while following the first image's current geometry, lighting, and perspective.",
       "Output only the transformed frame.",
+    ].join(" ");
+  }
+  if (fusion && masked) {
+    return [
+      "The first image is a photo; the second is a placement mask where white marks where new content goes.",
+      `Add this into the masked region: ${prompt}.`,
+      "Render it as a striking, dimensional element that physically belongs in the scene —",
+      "correct scale, perspective, occlusion, shadows, and reflections for the scene's lighting.",
+      "Reproduce everything outside the mask exactly as it appears in the photo.",
+    ].join(" ");
+  }
+  if (fusion) {
+    return [
+      `Add to this photo: ${prompt}.`,
+      "Insert the new element(s) as if they physically exist in the scene —",
+      "correct scale, perspective, occlusion, shadows, and reflections for the scene's lighting.",
+      "Render them with a striking, dimensional, photoreal quality.",
+      "Keep the rest of the photo unchanged.",
     ].join(" ");
   }
   if (masked) {
@@ -53,9 +76,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let frame: unknown, prompt: unknown, mask: unknown, references: unknown;
+  let frame: unknown,
+    prompt: unknown,
+    mask: unknown,
+    references: unknown,
+    mode: unknown;
   try {
-    ({ frame, prompt, mask, references } = await req.json());
+    ({ frame, prompt, mask, references, mode } = await req.json());
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
@@ -114,11 +141,11 @@ export async function POST(req: NextRequest) {
           parts: [
             ...imageParts,
             {
-              text: buildInstruction(
-                prompt.trim(),
-                Boolean(maskMatch),
-                referenceMatches.length > 0
-              ),
+              text: buildInstruction(prompt.trim(), {
+                masked: Boolean(maskMatch),
+                chained: referenceMatches.length > 0,
+                fusion: mode === "fusion",
+              }),
             },
           ],
         },

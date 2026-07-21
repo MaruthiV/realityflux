@@ -1,6 +1,7 @@
 type EditOptions = {
   mask?: string;
   references?: string[];
+  mode?: "edit" | "fusion";
 };
 
 // Client-side wrapper for the edit endpoint.

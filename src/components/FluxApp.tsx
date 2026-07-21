@@ -127,6 +127,7 @@ export default function FluxApp() {
     try {
       const edited = await requestEdit(source, prompt, {
         mask: selection?.maskUrl,
+        mode,
       });
       setResult(edited);
       setSelection(null);
@@ -205,7 +206,9 @@ export default function FluxApp() {
   const statusMessage = STATUS_MESSAGES[status];
   const frozenFrame = selection?.frame ?? result;
   const promptPlaceholder = selection
-    ? "Describe what this becomes…"
+    ? mode === "edit"
+      ? "Describe what this becomes…"
+      : "Describe what appears here…"
     : mode === "edit"
       ? "Describe what to change…"
       : "Describe what to summon…";
@@ -323,7 +326,9 @@ export default function FluxApp() {
         {selection && !segmenting && (
           <div className="flex items-center gap-2 rounded-full border border-flux-accent/40 bg-black/40 py-1.5 pl-4 pr-1.5 backdrop-blur-xl">
             <span className="text-xs text-flux-accent">
-              Object locked — describe the change
+              {mode === "edit"
+                ? "Object locked — describe the change"
+                : "Spot locked — describe what appears here"}
             </span>
             <button
               onClick={() => setSelection(null)}
