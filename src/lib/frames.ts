@@ -24,3 +24,39 @@ export function captureFrame(
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/jpeg", 0.9);
 }
+
+export function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Failed to decode frame"));
+    img.src = dataUrl;
+  });
+}
+
+// Maps a screen tap to normalized frame coords, undoing the object-cover crop.
+export function mapTapToNormalized(
+  rect: DOMRect,
+  sourceAspect: number,
+  clientX: number,
+  clientY: number
+): { x: number; y: number } {
+  const rectAspect = rect.width / rect.height;
+  let x: number;
+  let y: number;
+  if (rectAspect > sourceAspect) {
+    // frame width fills the container, top/bottom are cropped
+    x = (clientX - rect.left) / rect.width;
+    const displayHeight = rect.width / sourceAspect;
+    y = (clientY - rect.top + (displayHeight - rect.height) / 2) / displayHeight;
+  } else {
+    y = (clientY - rect.top) / rect.height;
+    const displayWidth = rect.height * sourceAspect;
+    x = (clientX - rect.left + (displayWidth - rect.width) / 2) / displayWidth;
+  }
+  return { x: clamp01(x), y: clamp01(y) };
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}

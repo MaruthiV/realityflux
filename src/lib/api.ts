@@ -1,12 +1,13 @@
 // Client-side wrapper for the edit endpoint.
 export async function requestEdit(
   frame: string,
-  prompt: string
+  prompt: string,
+  mask?: string
 ): Promise<string> {
   const res = await fetch("/api/edit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ frame, prompt }),
+    body: JSON.stringify({ frame, prompt, mask }),
   });
 
   const body = await res.json().catch(() => null);

@@ -1,12 +1,19 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useCamera, type CameraStatus } from "@/hooks/useCamera";
-import { captureFrame } from "@/lib/frames";
+import { captureFrame, loadImage, mapTapToNormalized } from "@/lib/frames";
+import { segmentAt, warmUpSegmenter } from "@/lib/segmenter";
 import { requestEdit } from "@/lib/api";
 import PromptBar from "@/components/PromptBar";
 
 type Mode = "edit" | "fusion";
+
+type Selection = {
+  frame: string;
+  maskUrl: string;
+  overlayUrl: string;
+};
 
 const STATUS_MESSAGES: Partial<Record<CameraStatus, string>> = {
   requesting: "Waiting for camera access…",
@@ -16,13 +23,20 @@ const STATUS_MESSAGES: Partial<Record<CameraStatus, string>> = {
 
 export default function FluxApp() {
   const { videoRef, status, facing, flip } = useCamera();
+  const viewRef = useRef<HTMLElement | null>(null);
   const [mode, setMode] = useState<Mode>("edit");
   const [shots, setShots] = useState<string[]>([]);
   const [flash, setFlash] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [segmenting, setSegmenting] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Selection | null>(null);
   const [error, setError] = useState<string | null>(null);
   const errorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    warmUpSegmenter();
+  }, []);
 
   const showError = (message: string) => {
     if (errorTimer.current) clearTimeout(errorTimer.current);
@@ -32,6 +46,15 @@ export default function FluxApp() {
 
   const addShot = (frame: string) => {
     setShots((prev) => [frame, ...prev].slice(0, 8));
+  };
+
+  // The frame everything operates on: a locked selection, an edit result, or a live capture.
+  const currentSource = (): string | null => {
+    if (selection) return selection.frame;
+    if (result) return result;
+    const video = videoRef.current;
+    if (!video || status !== "active") return null;
+    return captureFrame(video, facing === "user");
   };
 
   const takeShot = () => {
@@ -44,18 +67,48 @@ export default function FluxApp() {
     setTimeout(() => setFlash(false), 150);
   };
 
-  // Edits the current result if one is showing, so prompts stack on each other.
+  const handleTap = async (e: React.PointerEvent) => {
+    const container = viewRef.current;
+    if (!container || busy || segmenting) return;
+    const source = currentSource();
+    if (!source) return;
+
+    setSegmenting(true);
+    try {
+      const image = await loadImage(source);
+      const point = mapTapToNormalized(
+        container.getBoundingClientRect(),
+        image.naturalWidth / image.naturalHeight,
+        e.clientX,
+        e.clientY
+      );
+      const segment = await segmentAt(source, point.x, point.y);
+      if (!segment) {
+        showError("Couldn't isolate anything there — try another spot.");
+        return;
+      }
+      setSelection({
+        frame: source,
+        maskUrl: segment.maskUrl,
+        overlayUrl: segment.overlayUrl,
+      });
+    } catch {
+      showError("Segmentation failed. Check your connection and try again.");
+    } finally {
+      setSegmenting(false);
+    }
+  };
+
   const runEdit = async (prompt: string) => {
-    const video = videoRef.current;
-    if (busy || status !== "active") return;
-    const source =
-      result ?? (video ? captureFrame(video, facing === "user") : null);
+    if (busy) return;
+    const source = currentSource();
     if (!source) return;
 
     setBusy(true);
     try {
-      const edited = await requestEdit(source, prompt);
+      const edited = await requestEdit(source, prompt, selection?.maskUrl);
       setResult(edited);
+      setSelection(null);
       addShot(edited);
     } catch (err) {
       showError(err instanceof Error ? err.message : "Something went wrong.");
@@ -64,12 +117,24 @@ export default function FluxApp() {
     }
   };
 
-  const backToLive = () => setResult(null);
+  const backToLive = () => {
+    setSelection(null);
+    setResult(null);
+  };
 
   const statusMessage = STATUS_MESSAGES[status];
+  const frozenFrame = selection?.frame ?? result;
+  const promptPlaceholder = selection
+    ? "Describe what this becomes…"
+    : mode === "edit"
+      ? "Describe what to change…"
+      : "Describe what to summon…";
 
   return (
-    <main className="relative h-dvh w-full overflow-hidden bg-flux-bg">
+    <main
+      ref={viewRef}
+      className="relative h-dvh w-full overflow-hidden bg-flux-bg"
+    >
       <video
         ref={videoRef}
         playsInline
@@ -77,14 +142,26 @@ export default function FluxApp() {
         className={`h-full w-full object-cover ${facing === "user" ? "-scale-x-100" : ""}`}
       />
 
-      {result && (
+      {frozenFrame && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={result}
-          alt="Edited frame"
+          src={frozenFrame}
+          alt="Current frame"
           className="absolute inset-0 h-full w-full object-cover"
         />
       )}
+
+      {selection && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={selection.overlayUrl}
+          alt="Selected region"
+          className="absolute inset-0 h-full w-full animate-pulse object-cover"
+        />
+      )}
+
+      {/* tap layer: sits above the frame, below the hud */}
+      <div className="absolute inset-0" onPointerUp={handleTap} />
 
       {busy && (
         <div className="pointer-events-none absolute inset-0 animate-pulse bg-gradient-to-t from-flux-accent/20 via-transparent to-flux-accent/10" />
@@ -92,7 +169,7 @@ export default function FluxApp() {
 
       {flash && <div className="absolute inset-0 bg-white/70" />}
 
-      {statusMessage && (
+      {statusMessage && !frozenFrame && (
         <div className="absolute inset-0 flex items-center justify-center bg-flux-bg/80 px-8 text-center">
           <p className="max-w-sm text-sm text-neutral-300">{statusMessage}</p>
         </div>
@@ -104,7 +181,7 @@ export default function FluxApp() {
           Reality<span className="text-flux-accent">Flux</span>
         </h1>
         <div className="flex items-center gap-2">
-          {result && (
+          {frozenFrame && (
             <button
               onClick={backToLive}
               className="rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs font-medium text-white backdrop-blur-xl"
@@ -146,6 +223,27 @@ export default function FluxApp() {
           </div>
         )}
 
+        {segmenting && (
+          <p className="rounded-full border border-white/10 bg-black/40 px-4 py-1.5 text-xs text-neutral-200 backdrop-blur-xl">
+            Finding the object…
+          </p>
+        )}
+
+        {selection && !segmenting && (
+          <div className="flex items-center gap-2 rounded-full border border-flux-accent/40 bg-black/40 py-1.5 pl-4 pr-1.5 backdrop-blur-xl">
+            <span className="text-xs text-flux-accent">
+              Object locked — describe the change
+            </span>
+            <button
+              onClick={() => setSelection(null)}
+              aria-label="Clear selection"
+              className="grid h-6 w-6 place-items-center rounded-full bg-white/10 text-xs text-white"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         <div className="flex rounded-full border border-white/10 bg-black/40 p-1 backdrop-blur-xl">
           {(["edit", "fusion"] as const).map((m) => (
             <button
@@ -162,13 +260,9 @@ export default function FluxApp() {
 
         <div className="flex w-full max-w-xl items-center gap-3">
           <PromptBar
-            disabled={status !== "active" || busy}
+            disabled={(status !== "active" && !frozenFrame) || busy}
             busy={busy}
-            placeholder={
-              mode === "edit"
-                ? "Describe what to change…"
-                : "Describe what to summon…"
-            }
+            placeholder={promptPlaceholder}
             onSubmit={runEdit}
           />
           <button

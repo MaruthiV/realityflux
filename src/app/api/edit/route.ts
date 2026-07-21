@@ -15,7 +15,15 @@ function getClient(): GoogleGenAI | null {
   return client;
 }
 
-function buildInstruction(prompt: string): string {
+function buildInstruction(prompt: string, masked: boolean): string {
+  if (masked) {
+    return [
+      "The first image is a photo; the second is a selection mask where white marks the only region you may change.",
+      `Apply this to the masked region: ${prompt}.`,
+      "Blend the edit seamlessly with the photo's lighting, perspective, and grain.",
+      "Reproduce everything outside the mask exactly as it appears in the photo.",
+    ].join(" ");
+  }
   return [
     `Edit this photo: ${prompt}.`,
     "Apply the change photorealistically, matching the original lighting, perspective, and grain.",
@@ -32,9 +40,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let frame: unknown, prompt: unknown;
+  let frame: unknown, prompt: unknown, mask: unknown;
   try {
-    ({ frame, prompt } = await req.json());
+    ({ frame, prompt, mask } = await req.json());
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
@@ -49,6 +57,22 @@ export async function POST(req: NextRequest) {
   }
   const [, mimeType, data] = frameMatch;
 
+  const maskMatch =
+    typeof mask === "string" ? mask.match(DATA_URL_PATTERN) : null;
+  if (mask != null && !maskMatch) {
+    return NextResponse.json(
+      { error: "Mask must be an image data URL." },
+      { status: 400 }
+    );
+  }
+
+  const imageParts = [{ inlineData: { mimeType, data } }];
+  if (maskMatch) {
+    imageParts.push({
+      inlineData: { mimeType: maskMatch[1], data: maskMatch[2] },
+    });
+  }
+
   try {
     const response = await ai.models.generateContent({
       model: MODEL,
@@ -56,8 +80,8 @@ export async function POST(req: NextRequest) {
         {
           role: "user",
           parts: [
-            { inlineData: { mimeType, data } },
-            { text: buildInstruction(prompt.trim()) },
+            ...imageParts,
+            { text: buildInstruction(prompt.trim(), Boolean(maskMatch)) },
           ],
         },
       ],
