@@ -4,11 +4,12 @@ import { useState } from "react";
 
 type Props = {
   disabled: boolean;
+  busy?: boolean;
   placeholder: string;
   onSubmit: (prompt: string) => void;
 };
 
-export default function PromptBar({ disabled, placeholder, onSubmit }: Props) {
+export default function PromptBar({ disabled, busy, placeholder, onSubmit }: Props) {
   const [value, setValue] = useState("");
 
   const submit = (e: React.FormEvent) => {
@@ -37,7 +38,7 @@ export default function PromptBar({ disabled, placeholder, onSubmit }: Props) {
         disabled={disabled || !value.trim()}
         className="rounded-xl bg-flux-accent px-4 py-2 text-sm font-medium text-black transition-opacity disabled:opacity-30"
       >
-        Flux
+        {busy ? "Fluxing…" : "Flux"}
       </button>
     </form>
   );
