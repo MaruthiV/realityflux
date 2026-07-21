@@ -15,7 +15,20 @@ function getClient(): GoogleGenAI | null {
   return client;
 }
 
-function buildInstruction(prompt: string, masked: boolean): string {
+function buildInstruction(
+  prompt: string,
+  masked: boolean,
+  chained: boolean
+): string {
+  if (chained) {
+    return [
+      "The first image is the live camera frame to edit.",
+      `The following image(s) show the same scene moments ago with this transformation already applied: ${prompt}.`,
+      "Re-apply exactly the same transformation to the first image — same materials, colors, and added elements as the references —",
+      "while following the first image's current geometry, lighting, and perspective.",
+      "Output only the transformed frame.",
+    ].join(" ");
+  }
   if (masked) {
     return [
       "The first image is a photo; the second is a selection mask where white marks the only region you may change.",
@@ -40,9 +53,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let frame: unknown, prompt: unknown, mask: unknown;
+  let frame: unknown, prompt: unknown, mask: unknown, references: unknown;
   try {
-    ({ frame, prompt, mask } = await req.json());
+    ({ frame, prompt, mask, references } = await req.json());
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
@@ -66,11 +79,30 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const referenceMatches = (Array.isArray(references) ? references : [])
+    .slice(0, 2)
+    .map((ref) => (typeof ref === "string" ? ref.match(DATA_URL_PATTERN) : null));
+  if (referenceMatches.some((match) => !match)) {
+    return NextResponse.json(
+      { error: "References must be image data URLs." },
+      { status: 400 }
+    );
+  }
+  if (maskMatch && referenceMatches.length > 0) {
+    return NextResponse.json(
+      { error: "Provide either a mask or references, not both." },
+      { status: 400 }
+    );
+  }
+
   const imageParts = [{ inlineData: { mimeType, data } }];
   if (maskMatch) {
     imageParts.push({
       inlineData: { mimeType: maskMatch[1], data: maskMatch[2] },
     });
+  }
+  for (const match of referenceMatches) {
+    imageParts.push({ inlineData: { mimeType: match![1], data: match![2] } });
   }
 
   try {
@@ -81,7 +113,13 @@ export async function POST(req: NextRequest) {
           role: "user",
           parts: [
             ...imageParts,
-            { text: buildInstruction(prompt.trim(), Boolean(maskMatch)) },
+            {
+              text: buildInstruction(
+                prompt.trim(),
+                Boolean(maskMatch),
+                referenceMatches.length > 0
+              ),
+            },
           ],
         },
       ],

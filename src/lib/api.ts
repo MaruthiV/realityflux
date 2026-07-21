@@ -1,13 +1,18 @@
+type EditOptions = {
+  mask?: string;
+  references?: string[];
+};
+
 // Client-side wrapper for the edit endpoint.
 export async function requestEdit(
   frame: string,
   prompt: string,
-  mask?: string
+  options: EditOptions = {}
 ): Promise<string> {
   const res = await fetch("/api/edit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ frame, prompt, mask }),
+    body: JSON.stringify({ frame, prompt, ...options }),
   });
 
   const body = await res.json().catch(() => null);
