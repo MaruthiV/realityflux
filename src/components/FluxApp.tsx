@@ -6,6 +6,8 @@ import { captureFrame, loadImage, mapTapToNormalized } from "@/lib/frames";
 import { segmentAt, warmUpSegmenter } from "@/lib/segmenter";
 import { requestEdit } from "@/lib/api";
 import PromptBar from "@/components/PromptBar";
+import HistoryRail from "@/components/HistoryRail";
+import { DownloadIcon, FlipIcon, PlayIcon } from "@/components/icons";
 
 type Mode = "edit" | "fusion";
 
@@ -29,6 +31,11 @@ const STATUS_MESSAGES: Partial<Record<CameraStatus, string>> = {
   denied: "Camera access was denied. Enable it in your browser settings and reload.",
   unavailable: "No camera available. RealityFlux needs one to work its magic.",
 };
+
+const MODES: { key: Mode; label: string; glyph: string }[] = [
+  { key: "edit", label: "Edit", glyph: "✎" },
+  { key: "fusion", label: "Fusion", glyph: "✦" },
+];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -203,8 +210,30 @@ export default function FluxApp() {
     setEffect(null);
   };
 
+  const viewShot = (shot: string) => {
+    if (streaming) return;
+    setSelection(null);
+    setResult(shot);
+  };
+
+  const downloadFrame = () => {
+    const frame = selection?.frame ?? result;
+    if (!frame) return;
+    const link = document.createElement("a");
+    link.href = frame;
+    link.download = `realityflux-${Date.now()}.png`;
+    link.click();
+  };
+
   const statusMessage = STATUS_MESSAGES[status];
   const frozenFrame = selection?.frame ?? result;
+  const showHint =
+    status === "active" &&
+    !frozenFrame &&
+    shots.length === 0 &&
+    !busy &&
+    !segmenting &&
+    !streaming;
   const promptPlaceholder = selection
     ? mode === "edit"
       ? "Describe what this becomes…"
@@ -232,9 +261,10 @@ export default function FluxApp() {
       {frozenFrame && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
+          key={frozenFrame.length}
           src={frozenFrame}
           alt="Current frame"
-          className="absolute inset-0 h-full w-full object-cover"
+          className="absolute inset-0 h-full w-full animate-fade-in object-cover"
         />
       )}
 
@@ -250,8 +280,14 @@ export default function FluxApp() {
       {/* tap layer: sits above the frame, below the hud */}
       <div className="absolute inset-0" onPointerUp={handleTap} />
 
-      {busy && (
-        <div className="pointer-events-none absolute inset-0 animate-pulse bg-gradient-to-t from-flux-accent/20 via-transparent to-flux-accent/10" />
+      {/* vignettes keep the hud readable over bright scenes */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/60 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-56 bg-gradient-to-t from-black/70 to-transparent" />
+
+      {(busy || streaming) && (
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute inset-x-0 top-0 h-28 animate-scan bg-gradient-to-b from-transparent via-flux-accent/25 to-transparent" />
+        </div>
       )}
 
       {flash && <div className="absolute inset-0 bg-white/70" />}
@@ -264,7 +300,7 @@ export default function FluxApp() {
 
       {/* top bar */}
       <header className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-4">
-        <h1 className="text-lg font-semibold tracking-tight text-white drop-shadow">
+        <h1 className="wordmark text-lg font-semibold text-white drop-shadow">
           Reality<span className="text-flux-accent">Flux</span>
         </h1>
         <div className="flex items-center gap-2">
@@ -275,12 +311,21 @@ export default function FluxApp() {
             </span>
           )}
           {frozenFrame && !streaming && (
-            <button
-              onClick={backToLive}
-              className="rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs font-medium text-white backdrop-blur-xl"
-            >
-              ● Live
-            </button>
+            <>
+              <button
+                onClick={downloadFrame}
+                aria-label="Download frame"
+                className="rounded-full border border-white/10 bg-black/40 p-2.5 backdrop-blur-xl transition-transform active:scale-90"
+              >
+                <DownloadIcon />
+              </button>
+              <button
+                onClick={backToLive}
+                className="rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs font-medium text-white backdrop-blur-xl"
+              >
+                ● Live
+              </button>
+            </>
           )}
           <button
             onClick={flip}
@@ -295,7 +340,7 @@ export default function FluxApp() {
 
       {error && (
         <div className="absolute inset-x-0 top-16 z-10 flex justify-center px-4">
-          <p className="rounded-xl border border-red-400/30 bg-red-950/70 px-4 py-2 text-xs text-red-200 backdrop-blur-xl">
+          <p className="animate-slide-down rounded-xl border border-red-400/30 bg-red-950/70 px-4 py-2 text-xs text-red-200 backdrop-blur-xl">
             {error}
           </p>
         </div>
@@ -303,28 +348,24 @@ export default function FluxApp() {
 
       {/* bottom hud */}
       <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-3 p-4 pb-6">
-        {shots.length > 0 && !streaming && (
-          <div className="flex w-full justify-end gap-1.5 overflow-x-auto">
-            {shots.map((shot, i) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={i}
-                src={shot}
-                alt={`Frame ${i + 1}`}
-                className="h-12 w-12 shrink-0 rounded-lg border border-white/15 object-cover"
-              />
-            ))}
-          </div>
+        {!streaming && (
+          <HistoryRail shots={shots} current={frozenFrame} onSelect={viewShot} />
+        )}
+
+        {showHint && (
+          <p className="animate-fade-in rounded-full border border-white/10 bg-black/40 px-4 py-1.5 text-xs text-neutral-300 backdrop-blur-xl">
+            Tap an object to select it, or describe a change below
+          </p>
         )}
 
         {segmenting && (
-          <p className="rounded-full border border-white/10 bg-black/40 px-4 py-1.5 text-xs text-neutral-200 backdrop-blur-xl">
+          <p className="animate-pulse rounded-full border border-white/10 bg-black/40 px-4 py-1.5 text-xs text-neutral-200 backdrop-blur-xl">
             Finding the object…
           </p>
         )}
 
         {selection && !segmenting && (
-          <div className="flex items-center gap-2 rounded-full border border-flux-accent/40 bg-black/40 py-1.5 pl-4 pr-1.5 backdrop-blur-xl">
+          <div className="flex animate-fade-in items-center gap-2 rounded-full border border-flux-accent/40 bg-black/40 py-1.5 pl-4 pr-1.5 backdrop-blur-xl">
             <span className="text-xs text-flux-accent">
               {mode === "edit"
                 ? "Object locked — describe the change"
@@ -341,15 +382,16 @@ export default function FluxApp() {
         )}
 
         <div className="flex rounded-full border border-white/10 bg-black/40 p-1 backdrop-blur-xl">
-          {(["edit", "fusion"] as const).map((m) => (
+          {MODES.map(({ key, label, glyph }) => (
             <button
-              key={m}
-              onClick={() => setMode(m)}
-              className={`rounded-full px-4 py-1 text-xs font-medium capitalize transition-colors ${
-                mode === m ? "bg-flux-accent text-black" : "text-neutral-300"
+              key={key}
+              onClick={() => setMode(key)}
+              className={`flex items-center gap-1.5 rounded-full px-4 py-1 text-xs font-medium transition-colors ${
+                mode === key ? "bg-flux-accent text-black" : "text-neutral-300"
               }`}
             >
-              {m}
+              <span aria-hidden>{glyph}</span>
+              {label}
             </button>
           ))}
         </div>
@@ -366,7 +408,7 @@ export default function FluxApp() {
               onClick={startStream}
               disabled={status !== "active" || busy}
               aria-label="Go live with this effect"
-              className="grid h-14 w-14 shrink-0 place-items-center rounded-full border-2 border-flux-accent bg-flux-accent/20 backdrop-blur-xl transition-transform active:scale-90 disabled:opacity-30"
+              className="grid h-14 w-14 shrink-0 place-items-center rounded-full border-2 border-flux-accent bg-flux-accent/20 shadow-[0_0_24px_rgba(124,247,212,0.35)] backdrop-blur-xl transition-transform active:scale-90 disabled:opacity-30"
             >
               <PlayIcon />
             </button>
@@ -393,33 +435,5 @@ export default function FluxApp() {
         </div>
       </div>
     </main>
-  );
-}
-
-function FlipIcon() {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="white"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M3 8v4h4" />
-      <path d="M21 16v-4h-4" />
-      <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-      <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-    </svg>
-  );
-}
-
-function PlayIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="#7cf7d4">
-      <path d="M8 5v14l11-7z" />
-    </svg>
   );
 }

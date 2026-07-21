@@ -1,5 +1,12 @@
 import type { Metadata, Viewport } from "next";
+import { Space_Grotesk } from "next/font/google";
 import "./globals.css";
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+  variable: "--font-display",
+});
 
 export const metadata: Metadata = {
   title: "RealityFlux",
@@ -20,7 +27,9 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className="overflow-hidden">{children}</body>
+      <body className={`${spaceGrotesk.variable} overflow-hidden`}>
+        {children}
+      </body>
     </html>
   );
 }
