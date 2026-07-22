@@ -27,4 +27,14 @@ npm run dev
 
 Grab a key from [Google AI Studio](https://aistudio.google.com/apikey). Heads up: every edit and every live-mode frame is a real image generation call (~$0.04 each), so the live loop can add up — there's a frame counter in the corner for exactly that reason.
 
+### On your phone
+
+Browsers only allow camera access over HTTPS (localhost being the one exception), so there's a separate script for LAN testing:
+
+```bash
+npm run dev:phone
+```
+
+The first run asks for your password — that's mkcert setting up a local certificate authority. Then open `https://<your-computer's-LAN-IP>:3000` on your phone, accept the certificate warning, and grant camera access.
+
 *(Demos, GIFs, and a walkthrough video are coming as the build progresses.)*
